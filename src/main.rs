@@ -1,3 +1,4 @@
+mod aggregator;
 mod config;
 mod log_watcher;
 mod monitor;
@@ -5,7 +6,7 @@ mod monitor;
 use anyhow::{anyhow, Result};
 use log::error;
 use monitor::Monitor;
-use std::{process::exit, sync::Arc};
+use std::process::exit;
 
 #[tokio::main]
 async fn main() {
@@ -28,13 +29,18 @@ Refer to https://github.com/reujab/ramon#specification-wip"#
         )
     })?;
 
-    let notify_config = Arc::new(config.notifications);
-
     // Process monitors.
     let mut monitors = Vec::with_capacity(config.monitors.len());
     for monitor_config in config.monitors {
         let name = monitor_config.name.clone();
-        let monitor = Monitor::new(monitor_config, notify_config.clone())
+        let aggregator_id = match &monitor_config.notify {
+            None => "default",
+            Some(notify) => &notify.r#type,
+        };
+        let aggregator = config.aggregator_txs.get(aggregator_id).ok_or(anyhow!(
+            "Could not find notification config for {aggregator_id:?}"
+        ))?;
+        let monitor = Monitor::new(monitor_config, aggregator.clone())
             .await
             .map_err(|err| anyhow!("Monitor `{}`: {err}", name))?;
         monitors.push(monitor);

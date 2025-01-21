@@ -253,4 +253,4 @@ This action sends a notification via email, PushBullet, etc. If this key is a st
 
 ## Notifications\*
 
-- Not yet implemented
+\* Not yet implemented

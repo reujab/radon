@@ -1,32 +1,27 @@
 use crate::{
-    config::{value_to_string, Exec, MonitorConfig, Notification, NotificationConfig},
+    config::{value_to_string, Exec, MonitorConfig, Notification},
     log_watcher::LogWatcher,
 };
 use anyhow::{anyhow, bail, Result};
-use lettre::{
-    message::header::ContentType, transport::smtp::authentication::Credentials, Message,
-    SmtpTransport, Transport,
-};
 use log::{debug, error, info, warn};
 use regex::Regex;
 use std::{
     collections::{HashMap, HashSet},
     mem::replace,
     process::Stdio,
-    sync::Arc,
     time::{Duration, Instant},
 };
 use tokio::{
     fs::{create_dir, rename, OpenOptions},
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter},
     process::Command,
-    sync::mpsc::{self, Receiver},
+    sync::mpsc::{self, Receiver, Sender},
 };
 use toml::Value;
 
 pub struct Monitor {
     pub name: String,
-    notify_config: NotificationConfig,
+    aggregator_tx: Sender<Notification>,
 
     event_rx: Receiver<Event>,
     last_action_time: Option<Instant>,
@@ -59,10 +54,7 @@ struct Threshold {
 }
 
 impl Monitor {
-    pub async fn new(
-        config: MonitorConfig,
-        notify_config: Arc<HashMap<String, NotificationConfig>>,
-    ) -> Result<Self> {
+    pub async fn new(config: MonitorConfig, aggregator_tx: Sender<Notification>) -> Result<Self> {
         let name = config.name;
 
         let (event_tx, event_rx) = mpsc::channel(1);
@@ -137,20 +129,9 @@ impl Monitor {
             rotating_index: 0,
         });
 
-        let notify_type = match &config.notify {
-            None => "default",
-            Some(notify) => &notify.r#type,
-        };
-        let notify_config = notify_config
-            .get(notify_type)
-            .ok_or(anyhow!(
-                "Could not find notification config `{notify_type}`."
-            ))?
-            .to_owned();
-
         Ok(Self {
             name,
-            notify_config,
+            aggregator_tx,
 
             event_rx,
             last_action_time: None,
@@ -321,35 +302,7 @@ impl Monitor {
         }
 
         if let Some(notification) = &self.notify {
-            if let Some(smtp) = &self.notify_config.smtp {
-                let email = Message::builder()
-                    .from(smtp.from.clone())
-                    .to(smtp.to.clone())
-                    .subject(&notification.title)
-                    .header(ContentType::TEXT_PLAIN)
-                    .body(notification.body.clone())
-                    .map_err(|err| anyhow!("Failed to build email: {err}"))?;
-                let mailer = match &smtp.login {
-                    None => SmtpTransport::unencrypted_localhost(),
-                    Some(login) => {
-                        let creds =
-                            Credentials::new(login.username.clone(), login.password.clone());
-                        SmtpTransport::starttls_relay(&login.host)
-                            .map_err(|err| anyhow!("Failed to parse {:?}: {err}", login.host))?
-                            .credentials(creds)
-                            .build()
-                    }
-                };
-                if let Err(err) = mailer.send(&email) {
-                    error!("[{}] Failed to send email: {err}", self.name);
-                    if smtp.login.is_none() {
-                        info!(
-                            "[{}] Consider setting smtp_host, login, and password.",
-                            self.name
-                        );
-                    }
-                }
-            }
+            self.aggregator_tx.send(notification.clone()).await?;
         }
 
         Ok(())

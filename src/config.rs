@@ -3,12 +3,17 @@ use std::{collections::HashMap, path::PathBuf, time::Duration};
 use anyhow::{anyhow, bail, Error, Result};
 use lettre::message::Mailbox;
 use regex::Regex;
-use tokio::time::{interval, Interval};
+use tokio::{
+    sync::mpsc::Sender,
+    time::{interval, Interval},
+};
 use toml::{Table, Value};
+
+use crate::aggregator::Aggregator;
 
 pub struct Config {
     pub monitors: Vec<MonitorConfig>,
-    pub notifications: HashMap<String, NotificationConfig>,
+    pub aggregator_txs: HashMap<String, Sender<Notification>>,
 }
 
 pub struct MonitorConfig {
@@ -28,19 +33,17 @@ pub struct MonitorConfig {
     pub notify: Option<Notification>,
 }
 
-#[derive(Clone, Default)]
 pub struct NotificationConfig {
+    pub name: String,
     pub smtp: Option<SmtpConfig>,
 }
 
-#[derive(Clone)]
 pub struct SmtpConfig {
     pub from: Mailbox,
     pub to: Mailbox,
     pub login: Option<SmtpLogin>,
 }
 
-#[derive(Clone)]
 pub struct SmtpLogin {
     pub host: String,
     pub username: String,
@@ -52,6 +55,7 @@ pub enum Exec {
     Spawn(Vec<String>),
 }
 
+#[derive(Clone)]
 pub struct Notification {
     pub r#type: String,
     pub title: String,
@@ -63,12 +67,8 @@ pub fn parse(doc: &str) -> Result<Config> {
         .parse::<Table>()
         .map_err(|err| map_to_readable_syntax_err(doc, err))?;
 
-    let notification_config = match table.remove("notify") {
-        None => {
-            let mut map = HashMap::new();
-            map.insert("default".into(), NotificationConfig::default());
-            map
-        }
+    let aggregator_txs = match table.remove("notify") {
+        None => HashMap::new(),
         Some(Value::Table(mut notify)) => {
             let default = match notify.remove("default") {
                 None => Table::new(),
@@ -78,12 +78,14 @@ pub fn parse(doc: &str) -> Result<Config> {
 
             let mut hashmap = notify
                 .into_iter()
-                .map(|(name, config)| Ok((name, parse_notify_config(&default, config)?)))
-                .collect::<Result<HashMap<String, NotificationConfig>>>()
+                .map(|(name, config)| {
+                    Ok((name.clone(), parse_notify_config(name, config, &default)?))
+                })
+                .collect::<Result<HashMap<String, Sender<Notification>>>>()
                 .map_err(|err| anyhow!("Failed to parse notify config: {err}"))?;
             hashmap.insert(
                 "default".into(),
-                parse_notify_config(&Table::new(), default.into())
+                parse_notify_config("default".into(), default.into(), &Table::new())
                     .map_err(|err| anyhow!("Failed to parse default notification config: {err}"))?,
             );
             hashmap
@@ -115,7 +117,7 @@ pub fn parse(doc: &str) -> Result<Config> {
 
     Ok(Config {
         monitors: monitor_configs,
-        notifications: notification_config,
+        aggregator_txs,
     })
 }
 
@@ -147,7 +149,11 @@ fn map_to_readable_syntax_err(doc: &str, err: toml::de::Error) -> Error {
     anyhow!("{message}")
 }
 
-fn parse_notify_config(default: &Table, config: Value) -> Result<NotificationConfig> {
+fn parse_notify_config(
+    name: String,
+    config: Value,
+    default: &Table,
+) -> Result<Sender<Notification>> {
     let mut config_table = match config {
         Value::Table(config_table) => config_table,
         _ => bail!("Key must be a table."),
@@ -205,18 +211,22 @@ fn parse_notify_config(default: &Table, config: Value) -> Result<NotificationCon
         Some(_) => bail!("Key `from` must be a string."),
     };
 
-    let aggregate = match config_table.remove("aggregate") {
-        None => None,
-        Some(Value::String(aggregate)) => Some(
-            duration_str::parse(aggregate)
-                .map_err(|err| anyhow!("Failed to parse `aggregate`: {err}"))?,
-        ),
+    let config = NotificationConfig { name, smtp };
+
+    let aggregator_tx = match config_table.remove("aggregate") {
+        None => Aggregator::init(config, None),
+        Some(Value::String(aggregate)) => {
+            let duration = duration_str::parse(aggregate)
+                .map_err(|err| anyhow!("Failed to parse `aggregate`: {err}"))?;
+            let interval = interval(duration);
+            Aggregator::init(config, Some(interval))
+        }
         Some(_) => bail!("Key `aggregate` must be a string."),
     };
 
     assert_table_is_empty(config_table)?;
 
-    Ok(NotificationConfig { smtp })
+    Ok(aggregator_tx)
 }
 
 fn parse_monitor_config(name: String, mut monitor_table: Table) -> Result<MonitorConfig> {
