@@ -45,23 +45,6 @@ unique = "ip"
 notify = { type = "critical", title = "New SSH login from {{ip}} to {{user}}@{{host}}" }
 ```
 
-### System resources
-
-```toml
-[monitor.cpu] # Monitor
-every = "1s" # Event
-if = "cpu > 90"
-threshold = "2m" # Condition
-notify = { type = "warn", title = "[{{host}}] CPU > 90% for 2m" } # Action
-cooldown = "1h" # Condition
-
-[monitor.ram]
-every = "1s"
-if = "ram > 90 && swap > 50"
-notify = { type = "warn", title = "[{{host}}] RAM: {{ram}}%, swap: {{swap}}%" }
-cooldown = "1h"
-```
-
 ### Nginx
 
 ```toml
@@ -106,26 +89,6 @@ notify = { type = "critical", title = "File changed: /etc/passwd" }
 [monitor.ports]
 on = [ "port_open" ]
 notify = { type = "critical", title = "New port opened: {{port}}" }
-```
-
-### Tasks
-
-```toml
-# The following three monitors function identically.
-
-[monitor.1]
-# ...
-exec = 'echo "Cpu: $cpu%"'
-
-[monitor.2]
-# ...
-exec = ["echo", "Cpu:", "{{cpu}}%"]
-
-[task.print_cpu]
-exec = ["echo", "Cpu:", "{{cpu}}%"]
-[monitor.3]
-# ...
-call = "print_cpu"
 ```
 
 ## Specification (WIP)
@@ -208,10 +171,6 @@ This condition is true if the line does not match the specified regular expressi
 #### `unique` [-30] variable (string)
 
 This condition is true if the specified variable has not been seen before. Ramon will cache these values in a text file at `/var/cache/ramon/unique_<monitor name>`.
-
-#### `get_fail`\* [-45] string or array of strings
-
-This condition makes an HTTP GET request to the specified URLs and evaluates to true if any status code is not 200. If the URL begins with `/`, then `https://{{host}}` is prepended to the URL, allowing you to omit the scheme and hostname.
 
 ##### Local variables
 
