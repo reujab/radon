@@ -11,6 +11,7 @@ use std::{
     process::Stdio,
     time::{Duration, Instant},
 };
+use tinytemplate::TinyTemplate;
 use tokio::{
     fs::{create_dir, rename, OpenOptions},
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter},
@@ -302,9 +303,32 @@ impl Monitor {
         }
 
         if let Some(notification) = &self.notify {
-            self.aggregator_tx.send(notification.clone()).await?;
+            let notif = Self::render_notification(notification, &temp_variables)?;
+            self.aggregator_tx.send(notif).await?;
         }
 
         Ok(())
+    }
+
+    fn render_notification(
+        notification: &Notification,
+        variables: &HashMap<String, Value>,
+    ) -> Result<Notification> {
+        let mut tt = TinyTemplate::new();
+        tt.add_template("title", &notification.title)
+            .map_err(|err| anyhow!("Failed to parse title: {err}"))?;
+        tt.add_template("body", &notification.body)
+            .map_err(|err| anyhow!("Failed to parse body: {err}"))?;
+        let title = tt
+            .render("title", variables)
+            .map_err(|err| anyhow!("Failed to render title: {err}"))?;
+        let body = tt
+            .render("body", variables)
+            .map_err(|err| anyhow!("Failed to render body: {err}"))?;
+        Ok(Notification {
+            r#type: notification.r#type.clone(),
+            title,
+            body,
+        })
     }
 }

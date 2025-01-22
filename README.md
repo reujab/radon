@@ -42,7 +42,7 @@ aggregate = 0
 service = "ssh"
 match_log = '^.*\]: Accepted \S+ for (?<user>\S+) from (?<ip>)'
 unique = "ip"
-notify = { type = "critical", title = "New SSH login from {{ip}} to {{user}}@{{host}}" }
+notify = { type = "critical", title = "New SSH login from {ip} to {user}@{host}" }
 ```
 
 ### Nginx
@@ -52,9 +52,9 @@ notify = { type = "critical", title = "New SSH login from {{ip}} to {{user}}@{{h
 nginx_log = "/var/log/nginx/access.log"
 
 [monitor.nginx_5xx]
-log = "{{nginx_log}}"
+log = "{nginx_log}"
 match_log = '^\S+ \S+ \S+ \[.+\] "(?<path>.*)" (?<code>5\d{2})'
-notify = { type = "error", title = "Server error: {{code}} at {{path}}" }
+notify = { type = "error", title = "Server error: {code} at {path}" }
 ```
 
 ### HTTP
@@ -63,7 +63,7 @@ notify = { type = "error", title = "Server error: {{code}} at {{path}}" }
 [monitor.example_endpoint]
 every = "5m"
 get_fail = "https://example.com/endpoint"
-notify = { type = "error", title = "{{url}}: {{err}}" }
+notify = { type = "error", title = "{url}: {err}" }
 ```
 
 ### systemd
@@ -71,7 +71,7 @@ notify = { type = "error", title = "{{url}}: {{err}}" }
 ```toml
 [monitor.services]
 on = [ "service_fail" ]
-notify = { type = "error", title = "Service failed: {{service}}" }
+notify = { type = "error", title = "Service failed: {service}" }
 
 [monitor.critical_service]
 service = "criticald"
@@ -88,7 +88,7 @@ notify = { type = "critical", title = "File changed: /etc/passwd" }
 
 [monitor.ports]
 on = [ "port_open" ]
-notify = { type = "critical", title = "New port opened: {{port}}" }
+notify = { type = "critical", title = "New port opened: {port}" }
 ```
 
 ## Specification (WIP)
