@@ -7,6 +7,7 @@ use anyhow::{anyhow, Result};
 use log::error;
 use monitor::Monitor;
 use std::process::exit;
+use tokio::{fs::File, io::AsyncReadExt};
 
 #[tokio::main]
 async fn main() {
@@ -20,8 +21,14 @@ async fn main() {
 }
 
 async fn run() -> Result<()> {
-    let doc = include_str!("../ramon.toml");
-    let config = config::parse(doc).map_err(|err| {
+    let mut doc = String::new();
+    File::open("/etc/ramon.toml")
+        .await
+        .map_err(|err| anyhow!("Failed to open /etc/ramon.toml: {err}"))?
+        .read_to_string(&mut doc)
+        .await
+        .map_err(|err| anyhow!("Failed to read /etc/ramon.toml: {err}"))?;
+    let config = config::parse(&doc).map_err(|err| {
         anyhow!(
             r#"Failed to parse ramon.toml: {err}
 
